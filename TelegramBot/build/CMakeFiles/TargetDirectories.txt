@@ -1,0 +1,3 @@
+C:/TelegramBot/build/CMakeFiles/echobot.dir
+C:/TelegramBot/build/CMakeFiles/ALL_BUILD.dir
+C:/TelegramBot/build/CMakeFiles/ZERO_CHECK.dir
