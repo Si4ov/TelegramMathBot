@@ -10,45 +10,99 @@
 #include <queue>
 #include <thread>
 #include <chrono>
+#include <regex>
 
 
 
 
-std::string CalcFibonacci(long long& Data, long long& Results)
+std::string CalcFibonacci(long long Data)
 {
-	long long a = 1, b = 1;
+	if (Data > 0 && Data <= 90)
+	{
+		
+		long long a = 1, b = 1, Results;
 
-	for (int i = 2; i <= Data; ++i) {
-		long long temp = a + b;
-		a = b;
-		b = temp;
+		for (int i = 2; i <= Data; ++i) {
+			long long temp = a + b;
+			a = b;
+			b = temp;
+		}
+
+		(Results == 1) ? Results = b : Results = a;
+		std::string resultString = std::string{ "The " + std::to_string(Data) + " number in Fibonacci sequence is " } + std::to_string(Results);
+		return resultString;
 	}
-
-	(Results == 1) ? Results = b : Results = a;
-	std::string resultString = { "The " + std::to_string(Data) + " number in Fibonacci sequence is " };
-	return resultString;
+	else if (Data < 0 || Data > 90)
+	{
+		std::string resultString = std::string{ "Wrong range: it should be less than 90" };
+		return resultString;
+	}
 }
 
-std::string CalcSumDivisibleBy5(long long &Data, long long& Results)
+std::string CalcSumDivisibleBy5(long long Data)
+{
+	if (Data > 0 && Data <= 10000)
+	{
+		int sum = 0;
+		for (int i = 0; i <= Data; ++i) {
+			if (i % 5 == 0) {
+				sum += i;
+			};
+		}
+
+		std::string resultString = std::string{ "The summation of all numbers that can be divided by 5 without any remainder is "} + std::to_string(sum);
+		return resultString;
+	}
+	else if (Data < 0 || Data > 10000)
+	{
+		std::string resultString = std::string{ "Wrong range: it should be less than 10000" };
+		return resultString;
+	}
+}
+
+
+class TaskClass
 {
 
-	int sum = 0;
-	for (int i = 0; i <= Data; ++i) {
-		if (i % 5 == 0) {
-			sum += i;
-		};
+private:
+	std::vector<std::string> BotCommands = { "start", "find_fibonacci", "subdiv" };
+
+public:
+
+	std::string Command;
+	long long CalcData;
+
+	TaskClass(  std::string& cmd, int cData ) : Command(cmd), CalcData(cData){}
+
+
+	std::string operator()()
+	{
+		std::string result;
+
+		if (Command == BotCommands[1])
+		{
+			result = CalcFibonacci(CalcData);
+
+			return result;
+
+		}
+		else if (Command == BotCommands[2])
+		{
+			result = CalcSumDivisibleBy5(CalcData);
+
+			return result;
+		}
+		return result;
 	}
-	Results = sum;
-	std::string resultString = { "The summation of all numbers that can be divided by 5 without any remainder is " };
-	return resultString;
-}
+};
+
 
 // Threadpool
 
 class ThreadPool
 {
 	//LIST OF TASKS MUTEX AND COND VAR
-	std::queue<std::pair<std::future<void>, int>> QueueOfTasks;
+	std::queue<std::shared_ptr<TaskClass>> QueueOfTasks;
 
 	std::mutex Queue_mutex;
 	std::condition_variable Queue_ConditionVar;
@@ -59,8 +113,6 @@ class ThreadPool
 
 	std::atomic<bool> Quite{ false };
 
-	//LAST INDEX
-	std::atomic<int> last_idx = 0;
 
 public:
 	//CREATION LIST OF THREADS AND RUN THEM
@@ -68,20 +120,21 @@ public:
 	{
 		Threads.reserve(num_threads);
 		for (int i = 0; i < num_threads; ++i) {
-			threads.emplace_back(&ThreadPool::RunThread, this);
+			Threads.emplace_back(&ThreadPool::RunThread, this);
 		}
 	};
 
 
 	//ADD TASK TO Queue
-	template <typename Func, typename... Args>
-	void AddTask(const Func& task_func, Args&... args)
+	template <typename Func>
+	std::string AddTask(const Func& task_func)
 	{
-		int task_idx = last_idx++;
 		std::lock_guard<std::mutex> q_lock(Queue_mutex);
-		QueueOfTasks.emplace(std::async(std::launch::deferred, task_func, args...), task_idx);
+		auto task = std::make_shared<TaskClass>(task_func);
+		QueueOfTasks.push(task);
 		Queue_ConditionVar.notify_one();
 
+		return task->operator()();
 	}
 
 
@@ -91,7 +144,7 @@ public:
 	{
 		Quite = true;
 		Queue_ConditionVar.notify_all();
-		for (auto& thread : threads) {
+		for (auto& thread : Threads) {
 			thread.join();
 		}
 	}
@@ -101,83 +154,58 @@ private:
 	//RUN THREAD
 	void RunThread()
 	{
-		while (!quite) {
+		while (!Quite)
+		{
 			std::unique_lock<std::mutex> lock(Queue_mutex);
 
-			// wait if queue of tasks is empty
-			Queue_ConditionVar.wait(lock, [this]()->bool { return !QueueOfTasks.empty() || quite; });
+			Queue_ConditionVar.wait(lock, [this]() -> bool { return !QueueOfTasks.empty() || Quite; });
 
-			if(!QueueOfTasks.empty()) {
-				auto elem = std::move(QueueOfTasks.front());
+			if (!QueueOfTasks.empty())
+			{
+				auto task = std::move(QueueOfTasks.front());
 				QueueOfTasks.pop();
-
-				elem.first.get();
+				lock.unlock();
+				(*task)();
 			}
 		}
 	};
 
 };
 
-template <typename Callable>
-void BotEvent(TgBot::Bot& DataBot, ThreadPool& poolOfThreadsData, Callable& CalculatedMethod , int range, bool& isProcessing)
-{
-	DataBot.getEvents().onNonCommandMessage([&DataBot, &poolOfThreadsData, &range, CalculatedMethod, &isProcessing](TgBot::Message::Ptr message) {
-		std::this_thread::sleep_for(std::chrono::seconds(5));
-		if (isProcessing)
-		{
-			DataBot.getApi().sendMessage(message->chat->id, "Range = " + std::to_string(range));
-			long long number = std::stoi(message->text);
-			DataBot.getApi().sendMessage(message->chat->id, "Calculate...");
-			if (number > 0 && number <= range) {
-				long long results = 0;
 
-				poolOfThreadsData.AddTask(CalculatedMethod, number, results);
-
-				DataBot.getApi().sendMessage(message->chat->id, "Result: " + std::to_string(results));
-				isProcessing = false;
-			}
-			else if (number < 0 || number > range) {
-				DataBot.getApi().sendMessage(message->chat->id, "Wrong range: "+ std::to_string(range));
-				isProcessing = false;
-			}
-		}
-	});
-	
-}
 
 int main() {
 
-	std::vector<std::string> bot_commands = { "start", "find_fibonacci", "subdiv_5" };
+	std::vector<std::string> BotCommands = { "start", "find_fibonacci", "subdiv" };
 
 	ThreadPool poolOfThreads(2);
 
 
 	TgBot::Bot bot("YOUR TOKEN ID");
 
-	bool Controller = true;
+	bot.getEvents().onAnyMessage([BotCommands, &bot, &poolOfThreads](TgBot::Message::Ptr message) {
+		for (std::string command : BotCommands) {
+			//check if we have command in message 
+			if (message->text.find(command) != std::string::npos) {
+				std::regex integerRegex("\\d+"); 
+				std::smatch match;
 
-	bot.getEvents().onCommand("start", [&bot](TgBot::Message::Ptr message) {
-		bot.getApi().sendMessage(message->chat->id, "Hi " + message->chat->firstName);
+				//check if we have int after command
+				if (std::regex_search(message->text, match, integerRegex)) {
+					int extractedNumber = std::stoi(match[0]);
+					TaskClass MyTask(command, extractedNumber);
+					//push task to pool and save result executed on () operator
+					std::string result = poolOfThreads.AddTask(MyTask);
+
+					bot.getApi().sendMessage(message->chat->id, result);
+					
+				}
+				else {
+					bot.getApi().sendMessage(message->chat->id, "No int after command");
+				}
+			}
+		};
 	});
-	bot.getEvents().onCommand("subdiv_5", [&bot, &poolOfThreads, &Controller](TgBot::Message::Ptr message) {
-		bot.getApi().sendMessage(message->chat->id, "Write a number from 1 to 10000");
-
-		//Call event
-		BotEvent(bot, poolOfThreads, CalcSumDivisibleBy5, 1000, Controller);
-		Controller = true;
-		
-	});
-	bot.getEvents().onCommand("find_fibonacci", [&bot, &poolOfThreads, &Controller](TgBot::Message::Ptr message) {
-		bot.getApi().sendMessage(message->chat->id, "Write a number from 1 to 90");
-
-		//Call event
-		BotEvent(bot, poolOfThreads, CalcFibonacci, 90 , Controller);
-		Controller = true;
-	});
-
-
-
-
 
 
 	try {
