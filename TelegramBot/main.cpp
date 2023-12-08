@@ -28,7 +28,7 @@ std::string CalcFibonacci(long long Data)
 			b = temp;
 		}
 
-		(Results == 1) ? Results = b : Results = a;
+		(Results = 1) ? Results = b : Results = a;
 		std::string resultString = std::string{ "The " + std::to_string(Data) + " number in Fibonacci sequence is " } + std::to_string(Results);
 		return resultString;
 	}
@@ -60,39 +60,69 @@ std::string CalcSumDivisibleBy5(long long Data)
 	}
 }
 
-
-class TaskClass
+//Task interface
+class TaskBaseClass
 {
-
 private:
-	std::vector<std::string> BotCommands = { "start", "find_fibonacci", "subdiv" };
+	TgBot::Bot& BotId;
+	int64_t ChatId;
 
 public:
 
+	TaskBaseClass(TgBot::Bot& bId, int64_t cId) : BotId(bId), ChatId(cId) {}
+
+
+	virtual void InputProcess()  = 0;
+	virtual void Respond()  = 0;
+
+	virtual ~TaskBaseClass() {};
+
+	TgBot::Bot& GetBotId() const { return BotId; }
+	int64_t GetChatId() const { return ChatId; }
+
+};
+
+//Fibonacci task
+class TaskFibonacci: public TaskBaseClass
+{
+private:
+
 	std::string Command;
-	long long CalcData;
+	int CalcData;
+	
+	std::string FibResult;
+public:
 
-	TaskClass(  std::string& cmd, int cData ) : Command(cmd), CalcData(cData){}
+	TaskFibonacci(std::string cmd, int cData, TgBot::Bot& bId, int64_t cId) : TaskBaseClass(bId, cId), Command(cmd), CalcData(cData) {}
 
 
-	std::string operator()()
-	{
-		std::string result;
+	virtual void InputProcess() override{
+		FibResult = CalcFibonacci(CalcData);
+	}
+	virtual void Respond() override {
+		GetBotId().getApi().sendMessage(GetChatId(), FibResult);
+	}
+};
 
-		if (Command == BotCommands[1])
-		{
-			result = CalcFibonacci(CalcData);
+//SubDiv task
+class TaskSubDiv : public TaskBaseClass
+{
+private:
 
-			return result;
+	std::string Command;
+	int CalcData;
 
-		}
-		else if (Command == BotCommands[2])
-		{
-			result = CalcSumDivisibleBy5(CalcData);
+	std::string SubDivResult;
+public:
 
-			return result;
-		}
-		return result;
+	TaskSubDiv(std::string cmd, int cData, TgBot::Bot& bId, int64_t cId) : TaskBaseClass(bId, cId), Command(cmd), CalcData(cData) {}
+
+
+	virtual void InputProcess() override {
+		SubDivResult = CalcSumDivisibleBy5(CalcData);
+	}
+	virtual void Respond() override {
+		GetBotId().getApi().sendMessage(GetChatId(), SubDivResult);
 	}
 };
 
@@ -102,7 +132,7 @@ public:
 class ThreadPool
 {
 	//LIST OF TASKS MUTEX AND COND VAR
-	std::queue<std::shared_ptr<TaskClass>> QueueOfTasks;
+	std::queue<std::shared_ptr<TaskBaseClass>> QueueOfTasks;
 
 	std::mutex Queue_mutex;
 	std::condition_variable Queue_ConditionVar;
@@ -127,14 +157,11 @@ public:
 
 	//ADD TASK TO Queue
 	template <typename Func>
-	std::string AddTask(const Func& task_func)
+	void AddTask(const Func& task_func)
 	{
 		std::lock_guard<std::mutex> q_lock(Queue_mutex);
-		auto task = std::make_shared<TaskClass>(task_func);
-		QueueOfTasks.push(task);
+		QueueOfTasks.push(task_func);
 		Queue_ConditionVar.notify_one();
-
-		return task->operator()();
 	}
 
 
@@ -162,10 +189,11 @@ private:
 
 			if (!QueueOfTasks.empty())
 			{
-				auto task = std::move(QueueOfTasks.front());
+				auto task = QueueOfTasks.front();
 				QueueOfTasks.pop();
 				lock.unlock();
-				(*task)();
+				task->InputProcess();
+				task->Respond();
 			}
 		}
 	};
@@ -193,12 +221,16 @@ int main() {
 				//check if we have int after command
 				if (std::regex_search(message->text, match, integerRegex)) {
 					int extractedNumber = std::stoi(match[0]);
-					TaskClass MyTask(command, extractedNumber);
-					//push task to pool and save result executed on () operator
-					std::string result = poolOfThreads.AddTask(MyTask);
-
-					bot.getApi().sendMessage(message->chat->id, result);
-					
+					std::shared_ptr<TaskBaseClass>MyTask;
+					if (command == "find_fibonacci") {
+						MyTask = std::make_shared<TaskFibonacci>(command, extractedNumber, bot, message->chat->id);
+						poolOfThreads.AddTask(MyTask);
+					}
+					else if (command == "subdiv") {
+						MyTask = std::make_shared<TaskSubDiv>(command, extractedNumber, bot, message->chat->id);
+						poolOfThreads.AddTask(MyTask);
+					}
+	
 				}
 				else {
 					bot.getApi().sendMessage(message->chat->id, "No int after command");
