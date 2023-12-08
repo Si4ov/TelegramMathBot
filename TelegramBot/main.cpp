@@ -14,52 +14,6 @@
 
 
 
-
-std::string CalcFibonacci(long long Data)
-{
-	if (Data > 0 && Data <= 90)
-	{
-		
-		long long a = 1, b = 1, Results;
-
-		for (int i = 2; i <= Data; ++i) {
-			long long temp = a + b;
-			a = b;
-			b = temp;
-		}
-
-		(Results = 1) ? Results = b : Results = a;
-		std::string resultString = std::string{ "The " + std::to_string(Data) + " number in Fibonacci sequence is " } + std::to_string(Results);
-		return resultString;
-	}
-	else if (Data < 0 || Data > 90)
-	{
-		std::string resultString = std::string{ "Wrong range: it should be less than 90" };
-		return resultString;
-	}
-}
-
-std::string CalcSumDivisibleBy5(long long Data)
-{
-	if (Data > 0 && Data <= 10000)
-	{
-		int sum = 0;
-		for (int i = 0; i <= Data; ++i) {
-			if (i % 5 == 0) {
-				sum += i;
-			};
-		}
-
-		std::string resultString = std::string{ "The summation of all numbers that can be divided by 5 without any remainder is "} + std::to_string(sum);
-		return resultString;
-	}
-	else if (Data < 0 || Data > 10000)
-	{
-		std::string resultString = std::string{ "Wrong range: it should be less than 10000" };
-		return resultString;
-	}
-}
-
 //Task interface
 class TaskBaseClass
 {
@@ -95,6 +49,29 @@ public:
 
 	TaskFibonacci(std::string cmd, int cData, TgBot::Bot& bId, int64_t cId) : TaskBaseClass(bId, cId), Command(cmd), CalcData(cData) {}
 
+	std::string CalcFibonacci(long long Data)
+	{
+		if (Data > 0 && Data <= 90)
+		{
+
+			long long a = 1, b = 1, Results;
+
+			for (int i = 2; i <= Data; ++i) {
+				long long temp = a + b;
+				a = b;
+				b = temp;
+			}
+
+			(Results = 1) ? Results = b : Results = a;
+			std::string ResultString = std::string{ "The " + std::to_string(Data) + " number in Fibonacci sequence is " } +std::to_string(Results);
+			return ResultString;
+		}
+		else if (Data < 0 || Data > 90)
+		{
+			std::string ResultString = std::string{ "Wrong range: it should be less than 90" };
+			return ResultString;
+		}
+	}
 
 	virtual void InputProcess() override{
 		FibResult = CalcFibonacci(CalcData);
@@ -118,6 +95,27 @@ public:
 	TaskSubDiv(std::string cmd, int cData, TgBot::Bot& bId, int64_t cId) : TaskBaseClass(bId, cId), Command(cmd), CalcData(cData) {}
 
 
+	std::string CalcSumDivisibleBy5(long long Data)
+	{
+		if (Data > 0 && Data <= 10000)
+		{
+			int sum = 0;
+			for (int i = 0; i <= Data; ++i) {
+				if (i % 5 == 0) {
+					sum += i;
+				};
+			}
+
+			std::string ResultString = std::string{ "The summation of all numbers that can be divided by 5 without any remainder is " } +std::to_string(sum);
+			return ResultString;
+		}
+		else if (Data < 0 || Data > 10000)
+		{
+			std::string ResultString = std::string{ "Wrong range: it should be less than 10000" };
+			return ResultString;
+		}
+	}
+
 	virtual void InputProcess() override {
 		SubDivResult = CalcSumDivisibleBy5(CalcData);
 	}
@@ -134,14 +132,14 @@ class ThreadPool
 	//LIST OF TASKS MUTEX AND COND VAR
 	std::queue<std::shared_ptr<TaskBaseClass>> QueueOfTasks;
 
-	std::mutex Queue_mutex;
-	std::condition_variable Queue_ConditionVar;
+	std::mutex QueueMutex;
+	std::condition_variable QueueConditionVar;
 
 	//LIST OF THREADS
 	std::vector<std::thread> Threads;
 
 
-	std::atomic<bool> Quite{ false };
+	std::atomic<bool> Quit{ false };
 
 
 public:
@@ -157,11 +155,11 @@ public:
 
 	//ADD TASK TO Queue
 	template <typename Func>
-	void AddTask(const Func& task_func)
+	void AddTask(const Func& TaskFunc)
 	{
-		std::lock_guard<std::mutex> q_lock(Queue_mutex);
-		QueueOfTasks.push(task_func);
-		Queue_ConditionVar.notify_one();
+		std::lock_guard<std::mutex> q_lock(QueueMutex);
+		QueueOfTasks.push(TaskFunc);
+		QueueConditionVar.notify_one();
 	}
 
 
@@ -169,10 +167,10 @@ public:
 	//Destruct
 	~ThreadPool()
 	{
-		Quite = true;
-		Queue_ConditionVar.notify_all();
-		for (auto& thread : Threads) {
-			thread.join();
+		Quit = true;
+		QueueConditionVar.notify_all();
+		for (auto& Thread : Threads) {
+			Thread.join();
 		}
 	}
 
@@ -181,19 +179,19 @@ private:
 	//RUN THREAD
 	void RunThread()
 	{
-		while (!Quite)
+		while (!Quit)
 		{
-			std::unique_lock<std::mutex> lock(Queue_mutex);
+			std::unique_lock<std::mutex> Lock(QueueMutex);
 
-			Queue_ConditionVar.wait(lock, [this]() -> bool { return !QueueOfTasks.empty() || Quite; });
+			QueueConditionVar.wait(Lock, [this]() -> bool { return !QueueOfTasks.empty() || Quit; });
 
 			if (!QueueOfTasks.empty())
 			{
-				auto task = QueueOfTasks.front();
+				auto Task = QueueOfTasks.front();
 				QueueOfTasks.pop();
-				lock.unlock();
-				task->InputProcess();
-				task->Respond();
+				Lock.unlock();
+				Task->InputProcess();
+				Task->Respond();
 			}
 		}
 	};
@@ -206,12 +204,12 @@ int main() {
 
 	std::vector<std::string> BotCommands = { "start", "find_fibonacci", "subdiv" };
 
-	ThreadPool poolOfThreads(2);
+	ThreadPool PoolOfThreads(2);
 
 
 	TgBot::Bot bot("YOUR TOKEN ID");
 
-	bot.getEvents().onAnyMessage([BotCommands, &bot, &poolOfThreads](TgBot::Message::Ptr message) {
+	bot.getEvents().onAnyMessage([BotCommands, &bot, &PoolOfThreads](TgBot::Message::Ptr message) {
 		for (std::string command : BotCommands) {
 			//check if we have command in message 
 			if (message->text.find(command) != std::string::npos) {
@@ -224,11 +222,11 @@ int main() {
 					std::shared_ptr<TaskBaseClass>MyTask;
 					if (command == "find_fibonacci") {
 						MyTask = std::make_shared<TaskFibonacci>(command, extractedNumber, bot, message->chat->id);
-						poolOfThreads.AddTask(MyTask);
+						PoolOfThreads.AddTask(MyTask);
 					}
 					else if (command == "subdiv") {
 						MyTask = std::make_shared<TaskSubDiv>(command, extractedNumber, bot, message->chat->id);
-						poolOfThreads.AddTask(MyTask);
+						PoolOfThreads.AddTask(MyTask);
 					}
 	
 				}
